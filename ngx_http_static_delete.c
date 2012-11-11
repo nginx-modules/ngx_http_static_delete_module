@@ -11,16 +11,18 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY FLYGOAST "AS IS" AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF 
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. 
- * IN NO EVENT SHALL FLYGOAST BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
  */
 
 #include <nginx.h>
@@ -86,15 +88,14 @@ static char ngx_http_static_delete_success_page_top[] =
 "<html>" CRLF
 "<head><title>Successful deleted</title></head>" CRLF
 "<body bgcolor=\"white\">" CRLF
-"<center><h1>Successfull deleted</h1>" CRLF
-;
+"<center><h1>Successfull deleted</h1>" CRLF;
 
 static char ngx_http_static_delete_success_page_tail[] = 
 CRLF "</center>" CRLF
 "<hr><center>" NGINX_VER "</center>" CRLF
 "</body>" CRLF
-"</html>" CRLF
-;
+"</html>" CRLF;
+
 static void *
 ngx_http_static_delete_create_loc_conf(ngx_conf_t *cf)
 {
@@ -149,10 +150,6 @@ ngx_http_static_delete_handler(ngx_http_request_t *r)
         return NGX_HTTP_NOT_ALLOWED;
     }
 
-    if (r->uri.data[r->uri.len - 1] == '/') {
-        return NGX_HTTP_NOT_FOUND;
-    }
-
     rc = ngx_http_discard_request_body(r);
     if (rc != NGX_OK && rc != NGX_AGAIN) {
         return rc;
@@ -161,6 +158,18 @@ ngx_http_static_delete_handler(ngx_http_request_t *r)
     rc = ngx_http_complex_value(r, &sdlcf->filename, &filename);
     if (rc != NGX_OK) {
         return NGX_ERROR;
+    }
+
+    if (filename.data[filename.len - 1] == '/') {
+        return NGX_HTTP_NOT_FOUND;
+    }
+
+    if (ngx_strstr(filename.data, "./")) {
+        return NGX_HTTP_NOT_ALLOWED;
+    }
+
+    if (ngx_strstr(filename.data, "../")) {
+        return NGX_HTTP_NOT_ALLOWED;
     }
 
     last = ngx_http_map_filename_to_path(r, &filename, &path);
@@ -172,22 +181,18 @@ ngx_http_static_delete_handler(ngx_http_request_t *r)
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, log, 0, 
                    "http filename: \"%s\"", path.data);
 
-    if (ngx_delete_file(filename.data) == NGX_FILE_ERROR) {
+    if (ngx_delete_file(path.data) == NGX_FILE_ERROR) {
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, ngx_errno, 
-                ngx_delete_file_n " \"%s\" failed", filename.data);
+                ngx_delete_file_n " \"%s\" failed", path.data);
         return NGX_HTTP_NOT_FOUND;
     }
 
-    r->write_event_handler = ngx_http_request_empty_handler;
-
-    ngx_http_finalize_request(r, 
-        ngx_http_static_delete_send_response(r, &filename));
-
-    return NGX_OK;
+    return ngx_http_static_delete_send_response(r, &path);
 }
 
 static ngx_int_t
-ngx_http_static_delete_send_response(ngx_http_request_t *r, ngx_str_t *file) {
+ngx_http_static_delete_send_response(ngx_http_request_t *r, ngx_str_t *path)
+{
     ngx_chain_t      out;
     ngx_buf_t       *b;
     ngx_int_t        rc;
@@ -196,7 +201,7 @@ ngx_http_static_delete_send_response(ngx_http_request_t *r, ngx_str_t *file) {
     len = sizeof(ngx_http_static_delete_success_page_top) - 1
         + sizeof(ngx_http_static_delete_success_page_tail) - 1
         + sizeof("file: ") - 1
-        + file->len;
+        + path->len;
 
     r->headers_out.content_type.len = sizeof("text/html") - 1;
     r->headers_out.content_type.data = (u_char *)"text/html";
@@ -221,7 +226,7 @@ ngx_http_static_delete_send_response(ngx_http_request_t *r, ngx_str_t *file) {
     b->last = ngx_cpymem(b->last, ngx_http_static_delete_success_page_top,
             sizeof(ngx_http_static_delete_success_page_top) - 1);
     b->last = ngx_cpymem(b->last, "file: ", sizeof("file: ") - 1);
-    b->last = ngx_cpymem(b->last, file->data, file->len);
+    b->last = ngx_cpymem(b->last, path->data, path->len);
     b->last = ngx_cpymem(b->last, ngx_http_static_delete_success_page_tail,
             sizeof(ngx_http_static_delete_success_page_tail) - 1);
     b->last_buf = 1;
@@ -236,23 +241,47 @@ ngx_http_static_delete_send_response(ngx_http_request_t *r, ngx_str_t *file) {
 
 u_char *
 ngx_http_map_filename_to_path(ngx_http_request_t *r, ngx_str_t *filename,
-        ngx_str_t *path) {
-    u_char                      *last;
-    ngx_http_core_loc_conf_t    *clcf;
+    ngx_str_t *path)
+{
+    u_char                    *last;
+    ngx_http_core_loc_conf_t  *clcf;
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
+    if (clcf->alias) {
+        ngx_log_error(NGX_LOG_ALERT, r->connection->log, 0,
+                      "At present \"alias\" not supported in static delete "
+                      "module");
+        return NULL;
+    }
+
     if (clcf->root_lengths == NULL) {
-        path->len = clcf->root.len + filename->len + 1;
+        path->len = clcf->root.len + filename->len + 2;
         path->data = ngx_pnalloc(r->pool, path->len);
         if (path->data == NULL) {
             return NULL;
         }
+
         last = ngx_copy(path->data, clcf->root.data, clcf->root.len);
     } else {
-        return NULL;
-    }
-    last = ngx_cpystrn(last, filename->data, filename->len);
 
+        if (ngx_http_script_run(r, path, clcf->root_lengths->elts,
+                                filename->len + 2, clcf->root_values->elts)
+            == NULL)
+        {
+            return NULL;
+        }
+
+        if (ngx_conf_full_name((ngx_cycle_t *)ngx_cycle, path, 0) != NGX_OK) {
+            return NULL;
+        }
+
+        last = path->data + (path->len - filename->len - 2);
+    }
+
+    if (filename->data[0] != '/') {
+        *last++ = '/';
+    }
+    last = ngx_cpystrn(last, filename->data, filename->len + 1);
     return last;
 }
