@@ -1,2 +1,5 @@
+2012-11-12 VERSION 0.0.2
+    * Add basic test with Test::Nginx::Socket
+
 2012-11-11 VERSION 0.0.1
     * Initial release
