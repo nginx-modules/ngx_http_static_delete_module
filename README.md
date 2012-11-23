@@ -7,7 +7,7 @@ in `nginx`'s document root.
 Synopsis
 ===========
 
-    location /DELETE/(.*) {
+    location ~ /DELETE/(.*) {
         allow           192.168.100.101;
         deny            all;
         root            /usr/local/nginx/html;
